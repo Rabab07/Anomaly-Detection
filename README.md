@@ -1,88 +1,149 @@
 # Robust Industrial Anomaly Detection Under Adverse Imaging Conditions
 
-Systematic benchmarking of anomaly detection models (PatchCore, PaDiM) under
-real-world image degradations (low-light, blur, noise, fog) and evaluation of
-classical preprocessing methods as mitigation strategies.
+A rigorous 4-way comparative benchmark evaluating **test-time rescue preprocessing** vs. **training-time data augmentation** for anomaly detection robustness on MVTec-AD.
+
+## Status: ✅ Data Collection Complete
+
+**6,120 benchmark rows collected and verified.** All analysis figures generated.
+
+---
+
+## Key Results (Headline Numbers)
+
+| Condition | Mean Deg. AUROC | Rescue Success Rate | Mean Rescue Δ |
+|---|---|---|---|
+| PatchCore — Clean training | 0.7356 | 25.8% | −0.0717 |
+| PatchCore — Augmented training | **0.8588** (+12.3 pp) | 22.7% | −0.1490 |
+| PaDiM — Clean training | 0.6390 | 35.1% | −0.0456 |
+| PaDiM — Augmented training | **0.7400** (+10.1 pp) | 19.4% | −0.1134 |
+
+**Core finding**: Augmented training significantly improves corruption robustness (up to +24.6 pp for PatchCore/Gaussian blur/severe). Rescue preprocessing is net-harmful in all four conditions — and is *more* harmful when applied to augmented-trained models.
+
+---
 
 ## Project Structure
 
 ```
 anomaly-detection/
-├── experiment_config.json          # Locked corruption parameters & seeds
-├── anomaly_detection_briefing.md   # Research requirements document
+├── experiment_config.json           # Locked corruption parameters & seeds
+├── analyze_results.py               # ✅ Updated — full 4-way analysis, generates 6 figures
+├── benchmark_report.md              # ✅ Full paper-ready report with all tables
+│
+├── data/                            # ✅ Canonical CSVs (use these)
+│   ├── benchmark_clean_all_severities.csv   # 3,060 rows — clean training, both models
+│   ├── benchmark_full_4way.csv              # 6,120 rows — all 4 conditions unified
+│   ├── patchcore_clean_severe.csv           # PatchCore baseline, severe rescue only
+│   ├── patchcore_clean_mild_moderate.csv    # PatchCore baseline, mild+moderate
+│   ├── patchcore_clean_all_severities.csv   # PatchCore unified
+│   ├── padim_clean_severe.csv               # PaDiM baseline, severe rescue only
+│   ├── padim_clean_mild_moderate.csv        # PaDiM baseline, mild+moderate
+│   └── padim_clean_all_severities.csv       # PaDiM unified
+│
+├── patchcore_augmented.csv          # ✅ 1,530 rows — augmented training, PatchCore
+├── padim_augmented.csv              # ✅ 1,530 rows — augmented training, PaDiM
+│
+├── results/analysis/                # ✅ 6 publication figures
+│   ├── 01_baseline_comparison.png
+│   ├── 02_degradation_curves_4way.png
+│   ├── 03_augmented_training_gain.png
+│   ├── 04_rescue_delta_heatmap.png
+│   ├── 05_rescue_success_rates.png
+│   └── 06_severity_comparison.png
+│
+├── run_patchcore.py                 # ✅ Clean training runner
+├── run_padim.py                     # ✅ Clean training runner
+├── run_patchcore_augmented.py       # ✅ Augmented training runner
+├── run_padim_augmented.py           # ✅ Augmented training runner
+├── run_patchcore_rescue.py          # Rescue-only runner (all severities)
+├── run_padim_rescue.py              # Rescue-only runner (all severities)
+│
 ├── notebooks/
-│   ├── shared_utils.py             # Shared corruption/preprocessing functions
-│   ├── 00_setup_and_verify.py      # NB-0: Environment setup
-│   ├── 01_baselines_patchcore.py   # NB-1: PatchCore clean baselines
-│   ├── 02_baselines_padim.py       # NB-2: PaDiM clean baselines
-│   ├── 03_severity_calibration.py  # NB-3: Visual severity verification
-│   ├── 04_degradation_patchcore.py # NB-4: PatchCore degradation curves
-│   ├── 05_degradation_padim.py     # NB-5: PaDiM degradation curves
-│   ├── 06a_preprocessing_patchcore_blur_light.py  # NB-6a: Preprocessing (blur/light)
-│   ├── 06b_preprocessing_patchcore_noise_fog.py   # NB-6b: Preprocessing (noise/fog)
-│   ├── 07a_preprocessing_padim_blur_light.py      # NB-7a: PaDiM preprocessing (blur/light)
-│   ├── 07b_preprocessing_padim_noise_fog.py       # NB-7b: PaDiM preprocessing (noise/fog)
-│   ├── 08_training_corruption.py   # NB-8: Training-set corruption experiment
-│   ├── 09_visa_generalization.py   # NB-9: VisA generalization (stretch)
-│   └── 10_analysis_and_figures.py  # NB-10: Final analysis & figures
+│   ├── shared_utils.py
+│   ├── 00_setup_and_verify.py      # Environment setup
+│   ├── 01_baselines_patchcore.py
+│   ├── 02_baselines_padim.py
+│   ├── 03_severity_calibration.py
+│   ├── 04_degradation_patchcore.py
+│   ├── 05_degradation_padim.py
+│   ├── 06a/06b_preprocessing_patchcore_*.py
+│   ├── 07a/07b_preprocessing_padim_*.py
+│   ├── 08_training_corruption.py
+│   ├── 09_visa_generalization.py    # Optional stretch goal
+│   └── 10_analysis_and_figures.py
+│
+└── archive/                         # Superseded/partial runs
 ```
 
-## Experiment Pipeline
+---
 
-```
-NB-0 (setup) ─┬─► NB-1 (PatchCore) ──► NB-4 (degradation) ──► NB-6a/6b (preprocessing)
-               ├─► NB-2 (PaDiM) ──────► NB-5 (degradation) ──► NB-7a/7b (preprocessing)
-               ├─► NB-3 (calibration)
-               └─► NB-8 (training corruption)
-                                                                         ↓
-                                                               NB-10 (analysis)
-```
+## Experiment Design
 
-## Key Design Decisions
+### Models
+- **PatchCore**: `backbone=wide_resnet50_2`, `num_neighbors=9`, `max_epochs=1`
+- **PaDiM**: `backbone=wide_resnet50_2`, `layers=[layer1,layer2,layer3]`, `n_features=100`, `max_epochs=1`
 
-- **On-the-fly corruption**: Applied during inference, not saved to disk
-- **Kaggle-native**: All notebooks designed for Kaggle's GPU environment
-- **Session-safe**: Intermediate results saved after each category run
-- **Error-resilient**: try/except around each experiment to prevent total failure
+### 4 Training Conditions
+| Condition | Training data | Description |
+|---|---|---|
+| PatchCore — Clean | Standard MVTec-AD train split | No augmentation |
+| PatchCore — Augmented | 50% randomly corrupted train images | `prepare_augmented_train_data()` |
+| PaDiM — Clean | Standard MVTec-AD train split | No augmentation |
+| PaDiM — Augmented | 50% randomly corrupted train images | `prepare_augmented_train_data()` |
+
+### Corruption Types (5 × 3 = 15 conditions)
+| Type | Mild | Moderate | Severe |
+|---|---|---|---|
+| Low Light | γ=0.65 | γ=0.35 | γ=0.15 |
+| Gaussian Blur | σ=1, k=5 | σ=3, k=15 | σ=5, k=25 |
+| Motion Blur | k=7 | k=15 | k=25 |
+| Sensor Noise | var=0.005 | var=0.02 | var=0.05 |
+| Fog/Haze | coef 0.2–0.4 | coef 0.4–0.6 | coef 0.6–0.8 |
+
+### Rescue Methods (6 streams × 3 severities = 18 conditions)
+| Corruption | Rescue |
+|---|---|
+| Low-light | CLAHE + Retinex (2 methods) |
+| Gaussian blur | Wiener deconvolution (Gaussian PSF) |
+| Motion blur | Wiener deconvolution (Motion PSF) |
+| Sensor noise | Non-Local Means (NLM) |
+| Fog/haze | Dark Channel Prior dehaze |
+
+### Scope
+- 15 categories × 3 seeds = 45 pairs per condition
+- Per pair: 1 baseline + 15 degradation + 18 rescue = **34 rows**
+- Per condition: **1,530 rows**
+- **Total: 6,120 rows across 4 conditions**
+
+---
 
 ## Running on Kaggle
 
-1. Upload each `.py` file as a Kaggle notebook (paste cell by cell)
-2. Add `ipythonx/mvtec-ad` as input dataset
-3. Chain notebooks: each notebook's output → next notebook's input
-4. NB-1, NB-2, NB-3 can run in **parallel** (independent)
-5. NB-4/5 depend on NB-1/2 respectively
-6. NB-10 requires all prior outputs
+### For clean training runs (already complete):
+Use `patchcore_run2_severe_complete.ipynb` / `padim_run1_severe_complete.ipynb` as reference.
 
-## Corruption Types
+### For augmented training runs (already complete):
+Upload `run_patchcore_augmented.py` / `run_padim_augmented.py` as notebook source.
+Input: previous run's CSV from `patchcore_augmented.csv` / `padim_augmented.csv`.
 
-| Type | Mild | Moderate | Severe |
-|------|------|----------|--------|
-| Low Light | γ=0.5 | γ=0.35 | γ=0.2 |
-| Gaussian Blur | σ=1.0, k=7 | σ=2.0, k=11 | σ=4.0, k=23 |
-| Motion Blur | k=7 | k=15 | k=25 |
-| Sensor Noise | σ²=0.02 | σ²=0.05 | σ²=0.10 |
-| Fog/Haze | 0.2–0.35 | 0.45–0.65 | 0.75–0.95 |
-| Combined | Low-light (γ=0.35) + Noise (σ²=0.05) |
+### Session management:
+- Resume logic reads existing CSV and skips completed (category, seed) pairs
+- Results saved after **every** `engine.test()` call
+- GPU memory freed after each pair with `del model; torch.cuda.empty_cache()`
+- 12-hour session limit: expect ~6–8 categories per session for augmented runs
 
-## Preprocessing Methods
+---
 
-| Corruption | Method 1 | Method 2 | Baseline |
-|-----------|----------|----------|----------|
-| Low Light | CLAHE | — | HistMatch |
-| Gaussian Blur | Wiener Deconv | — | HistMatch |
-| Motion Blur | Unsharp Mask | — | HistMatch |
-| Sensor Noise | NLM Denoise | (BM3D optional) | HistMatch |
-| Fog/Haze | Dark Channel Prior | — | HistMatch |
+## What's Left Before Paper Writing
 
-## Requirements
+| Task | Priority | Notes |
+|---|---|---|
+| Statistical significance tests | **High** | Wilcoxon signed-rank on rescue deltas and aug-training gains |
+| Figure polish | **High** | Colorblind palette, LaTeX axis labels if CVPR/IEEE |
+| VisA generalization | **Medium** | Adds cross-dataset credibility; needed for top-venue papers |
+| Write paper | — | Full structure in `benchmark_report.md` |
 
-Kaggle pre-installs most dependencies. Additional:
-- `anomalib` (installed with `--no-deps` to protect CUDA)
-- `lightning`, `albumentationsx`, `jsonargparse`, `docstring_parser`, `rich`
-- Optional: `bm3d` for BM3D denoising
+---
 
 ## Dataset
-
-- **MVTec-AD**: 15 categories, 5354 images (Kaggle: `ipythonx/mvtec-ad`)
-- **VisA** (stretch): 12 categories (Kaggle: search "visa anomaly")
+- **MVTec-AD**: 15 categories (Kaggle: `ipythonx/mvtec-ad`)
+- **VisA** (optional): 12 categories (Kaggle: `marquis03/visa-dataset`)
